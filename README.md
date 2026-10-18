@@ -38,8 +38,8 @@ No servers, no package managers and no dependencies to install.
 2. Open `index.html` in any modern browser.
 
 ```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/<Urbanexxx>/<crypto-volatility-tracker>.git
+cd <crypto-volatility-tracker>
 # then simply open index.html in your browser
 ```
 
