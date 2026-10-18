@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crypto Volatility Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Manrope', 'system-ui', 'sans-serif'],
+          mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
+        },
+        colors: {
+          bg: '#0a0d12',
+          panel: '#10151d',
+          line: '#1c2531',
+          up: '#2ee6a6',
+          down: '#ff5470',
+          warn: '#f5b83d',
+          accent: '#38d0f0',
+        },
+      },
+    },
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+<style>
+  html { color-scheme: dark; }
+  body {
+    background:
+      radial-gradient(900px 500px at 8% -10%, rgba(56, 208, 240, .09), transparent 60%),
+      radial-gradient(800px 500px at 100% 0%, rgba(46, 230, 166, .06), transparent 55%),
+      #0a0d12;
+    background-attachment: fixed;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,.9), transparent 70%);
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.9), transparent 70%);
+  }
+  main { position: relative; z-index: 1; }
+
+  .glass {
+    background: linear-gradient(180deg, rgba(20, 27, 38, .78), rgba(13, 18, 26, .78));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid #1c2531;
+  }
+
+  /* Сегментированные переключатели */
+  .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: #0a0d12; border: 1px solid #1c2531; }
+  .seg button {
+    padding: 6px 12px; font-size: 12.5px; font-weight: 600; color: #7f8aa0; border-radius: 7px;
+    font-family: 'IBM Plex Mono', monospace; transition: background .15s, color .15s;
+  }
+  .seg button:hover { color: #e2e8f0; }
+  .seg button.on { background: rgba(56, 208, 240, .14); color: #7fe3f8; box-shadow: inset 0 0 0 1px rgba(56, 208, 240, .35); }
+  .seg button:focus-visible, .btn:focus-visible, input:focus-visible, #btn-refresh:focus-visible {
+    outline: 2px solid #38d0f0; outline-offset: 2px;
+  }
+
+  .btn {
+    padding: 8px 12px; font-size: 12.5px; font-weight: 600; border-radius: 10px; color: #b6c0d2;
+    background: #0a0d12; border: 1px solid #1c2531; transition: border-color .15s, color .15s;
+  }
+  .btn:hover { border-color: #38d0f0; color: #e2e8f0; }
+  .btn.on { border-color: rgba(46, 230, 166, .5); color: #2ee6a6; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge-norm  { color: #8892a6; background: rgba(136, 146, 166, .08); border-color: rgba(136, 146, 166, .2); }
+  .badge-warn  { color: #f5b83d; background: rgba(245, 184, 61, .12); border-color: rgba(245, 184, 61, .4); }
+  .badge-up    { color: #2ee6a6; background: rgba(46, 230, 166, .14); border-color: rgba(46, 230, 166, .5); }
+  .badge-down  { color: #ff5470; background: rgba(255, 84, 112, .14); border-color: rgba(255, 84, 112, .5); }
+
+  /* Карточки: подсветка аномалий — главный акцент интерфейса */
+  .card { position: relative; }
+  .card.is-warn { border-color: rgba(245, 184, 61, .45); }
+  .card.is-anom-up   { border-color: rgba(46, 230, 166, .75); animation: pulseUp 1.8s ease-in-out infinite; }
+  .card.is-anom-down { border-color: rgba(255, 84, 112, .75); animation: pulseDown 1.8s ease-in-out infinite; }
+  @keyframes pulseUp {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(46, 230, 166, .30), 0 0 22px rgba(46, 230, 166, .12); }
+    50%      { box-shadow: 0 0 0 6px rgba(46, 230, 166, 0), 0 0 38px rgba(46, 230, 166, .32); }
+  }
+  @keyframes pulseDown {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 84, 112, .30), 0 0 22px rgba(255, 84, 112, .12); }
+    50%      { box-shadow: 0 0 0 6px rgba(255, 84, 112, 0), 0 0 38px rgba(255, 84, 112, .32); }
+  }
+
+  /* Вспышка цены при изменении */
+  .flash-up   { animation: flashUp .9s ease-out; }
+  .flash-down { animation: flashDown .9s ease-out; }
+  @keyframes flashUp   { 0% { color: #2ee6a6; text-shadow: 0 0 14px rgba(46, 230, 166, .7); } 100% { text-shadow: 0 0 0 transparent; } }
+  @keyframes flashDown { 0% { color: #ff5470; text-shadow: 0 0 14px rgba(255, 84, 112, .7); } 100% { text-shadow: 0 0 0 transparent; } }
+
+  /* Скелетон загрузки */
+  .shimmer {
+    color: transparent !important; border-radius: 6px; width: 8.5rem;
+    background: linear-gradient(90deg, #151c28 25%, #1f2938 50%, #151c28 75%);
+    background-size: 200% 100%; animation: shimmer 1.3s linear infinite;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  /* Тосты */
+  .toast { animation: toastIn .28s cubic-bezier(.2, .9, .3, 1.2); cursor: pointer; }
+  .toast.out { opacity: 0; transform: translateX(24px); transition: all .3s; }
+  @keyframes toastIn { from { opacity: 0; transform: translateX(32px); } to { opacity: 1; transform: none; } }
+
+  .ring-progress { transition: stroke-dashoffset .25s linear; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .live-dot { animation: blink 1.6s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #243044; border-radius: 8px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+
+<body class="text-slate-200 font-sans min-h-screen antialiased">
+
+<!-- Контейнер уведомлений -->
+<div id="toasts" class="fixed top-4 right-4 z-50 flex flex-col gap-2 w-[calc(100%-2rem)] sm:w-96" aria-live="polite"></div>
+
+<main class="max-w-[1400px] mx-auto px-4 sm:px-6 py-5">
+
+  <!-- Шапка -->
+  <header class="flex flex-wrap items-center justify-between gap-4 mb-5">
+    <div class="flex items-center gap-3">
+      <div class="w-11 h-11 rounded-xl grid place-items-center bg-gradient-to-br from-accent to-up shadow-[0_0_26px_rgba(56,208,240,.35)]">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#06222a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14l4-6 4 8 4-12 3 10h3"/></svg>
+      </div>
+      <div>
+        <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight leading-tight">Crypto Volatility Tracker</h1>
+        <p class="text-[13px] text-slate-500">Ловит движения цены, которые сильнее обычных для самой монеты</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <div class="text-right hidden sm:block">
+        <div id="status" class="inline-flex items-center gap-2 text-[13px] font-semibold text-up">
+          <span class="w-2 h-2 rounded-full bg-up live-dot"></span><span>Система: Автономный Live-режим</span>
+        </div>
+        <div id="last-update" class="text-[11px] text-slate-500 font-mono">нет данных</div>
+      </div>
+
+      <button id="btn-refresh" class="relative w-14 h-14 rounded-full grid place-items-center group" title="Обновить сейчас" aria-label="Обновить сейчас">
+        <svg class="absolute inset-0" viewBox="0 0 56 56" aria-hidden="true">
+          <circle cx="28" cy="28" r="23" fill="rgba(10,13,18,.8)" stroke="#1c2531" stroke-width="4"/>
+          <circle id="ring" class="ring-progress" cx="28" cy="28" r="23" fill="none" stroke="#38d0f0" stroke-width="4"
+                  stroke-linecap="round" stroke-dasharray="144.51" stroke-dashoffset="0" transform="rotate(-90 28 28)"/>
+        </svg>
+        <span id="count" class="relative font-mono text-[15px] font-semibold text-slate-100 group-hover:text-accent">30</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Настройки -->
+  <section class="glass rounded-2xl p-4 mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4 items-end">
+    <div>
+      <div class="text-xs text-slate-400 mb-1.5">Сравнивать цену с ценой X минут назад</div>
+      <div id="seg-window" class="seg">
+        <button data-v="3">3 мин</button>
+        <button data-v="5" class="on">5 мин</button>
+        <button data-v="10">10 мин</button>
+        <button data-v="15">15 мин</button>
+      </div>
+    </div>
+    <div>
+      <label for="z-range" class="text-xs text-slate-400 mb-1.5 flex justify-between">
+        <span>Чувствительность: аномалия при |Z| от <b id="z-val" class="font-mono text-slate-200">3.0</b></span>
+      </label>
+      <input id="z-range" type="range" min="2" max="5" step="0.5" value="3" class="w-full accent-accent">
+    </div>
+    <div>
+      <div class="text-xs text-slate-400 mb-1.5">Автообновление</div>
+      <div id="seg-refresh" class="seg">
+        <button data-v="30" class="on">30 сек</button>
+        <button data-v="60">60 сек</button>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <button id="btn-sound" class="btn">Звук выключен</button>
+      <button id="btn-test" class="btn" title="Показать, как выглядит уведомление">Тестовый алерт</button>
+    </div>
+  </section>
+
+  <!-- Баннер активных аномалий -->
+  <div id="banner" class="hidden mb-4 rounded-2xl border px-4 py-3"></div>
+
+  <!-- Карточки монет -->
+  <section id="cards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-4"></section>
+
+  <!-- Графики: история и Z-score -->
+  <section class="grid lg:grid-cols-3 gap-4 mb-4">
+    <div class="glass rounded-2xl p-4 lg:col-span-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div>
+          <h2 class="font-bold">История движения цены</h2>
+          <p class="text-xs text-slate-500">Изменение каждой монеты в процентах от начала периода</p>
+        </div>
+        <div id="seg-history" class="seg">
+          <button data-v="30">30 мин</button>
+          <button data-v="60" class="on">1 час</button>
+          <button data-v="180">3 часа</button>
+        </div>
+      </div>
+      <div class="relative h-72"><canvas id="chart-history"></canvas></div>
+    </div>
+
+    <div class="glass rounded-2xl p-4">
+      <h2 class="font-bold">Z-score волатильности</h2>
+      <p class="text-xs text-slate-500 mb-3" id="z-sub">Во сколько раз текущее движение сильнее обычного</p>
+      <div class="relative h-72"><canvas id="chart-z"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Таблица и журнал -->
+  <section class="grid lg:grid-cols-3 gap-4 mb-4">
+    <div class="glass rounded-2xl p-4 lg:col-span-2">
+      <h2 class="font-bold mb-3">Волатильность прямо сейчас</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm min-w-[640px]">
+          <thead>
+            <tr class="text-left text-xs text-slate-500 border-b border-line">
+              <th class="py-2 pr-3 font-medium">Монета</th>
+              <th class="py-2 pr-3 font-medium text-right" id="th-past">Цена X мин назад</th>
+              <th class="py-2 pr-3 font-medium text-right">Цена сейчас</th>
+              <th class="py-2 pr-3 font-medium text-right" id="th-win">Изменение</th>
+              <th class="py-2 pr-3 font-medium text-right" title="Обычный разброс за 1 минуту за предыдущий час">σ за 1 мин</th>
+              <th class="py-2 pr-3 font-medium text-right">Z-score</th>
+              <th class="py-2 pr-3 font-medium text-right" title="Объём за окно относительно обычного">Объём</th>
+              <th class="py-2 font-medium">Статус</th>
+            </tr>
+          </thead>
+          <tbody id="vol-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="glass rounded-2xl p-4">
+      <div class="flex items-baseline justify-between mb-3">
+        <h2 class="font-bold">Журнал алертов</h2>
+        <span class="text-xs text-slate-500">последние 20</span>
+      </div>
+      <ul id="log" class="space-y-2 max-h-72 overflow-y-auto pr-1"></ul>
+    </div>
+  </section>
+
+  <!-- Детальный график -->
+  <section class="glass rounded-2xl p-4 mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+      <div>
+        <h2 class="font-bold">Цена и волатильность по минутам</h2>
+        <p class="text-xs text-slate-500">Линия показывает цену, столбцы показывают Z-score на каждой минуте</p>
+      </div>
+      <div id="seg-detail" class="seg"></div>
+    </div>
+    <div class="relative h-80"><canvas id="chart-detail"></canvas></div>
+  </section>
+
+  <!-- Методика -->
+  <details class="glass rounded-2xl p-4 mb-4 text-sm text-slate-400">
+    <summary class="cursor-pointer font-semibold text-slate-200">Как считается волатильность</summary>
+    <div class="mt-3 space-y-2 leading-relaxed max-w-3xl">
+      <p>Берём цену сейчас и цену X минут назад, считаем логарифмическое изменение: <span class="font-mono text-slate-300">R = ln(P_now / P_X)</span>.</p>
+      <p>Затем смотрим, как вела себя монета в предыдущие 60 минут: считаем разброс минутных доходностей (устойчивая оценка через медианное абсолютное отклонение, чтобы прошлые скачки не занижали чувствительность) <span class="font-mono text-slate-300">σ</span>.</p>
+      <p>Z-score: <span class="font-mono text-slate-300">Z = R / (σ · √X)</span>. Это число обычных «шагов», на которые цена ушла за X минут. Чем больше |Z|, тем необычнее движение для этой монеты.</p>
+      <p>Статус «повышенная» ставится при |Z| от порога минус 1, «аномалия» при |Z| от порога и движении не меньше 0.25%. Фильтр по проценту нужен, чтобы на тихом рынке копеечные сдвиги не считались аномалией. Один алерт на монету не чаще раза в 5 минут.</p>
+      <p class="text-slate-500">Данные в этой версии симулируются прямо в браузере (демо-режим): цены стартуют от базовых значений, а раз в пару минут у случайной монеты происходит искусственный скачок, чтобы показать работу алертов. Реальных котировок здесь нет, и проект не является инвестиционной рекомендацией.</p>
+    </div>
+  </details>
+
+</main>
+
+<script>
+'use strict';
+
+/* ============================================================
+   Конфигурация и состояние
+   ============================================================ */
+const COINS = [
+  { code: 'BTC', name: 'Bitcoin',  color: '#f7931a' },
+  { code: 'ETH', name: 'Ethereum', color: '#8c9eff' },
+  { code: 'SOL', name: 'Solana',   color: '#19fb9b' },
+  { code: 'BNB', name: 'BNB',      color: '#f3ba2f' },
+];
+
+const CFG = {
+  baselineMin: 60,          // сколько минут «нормального» поведения берём для σ
+  klines1m: 180,            // 3 часа минутных свечей
+  minMovePct: 0.25,         // минимальное движение (%) для статуса «аномалия»
+  cooldownMs: 5 * 60 * 1000,// антиспам: один алерт на монету раз в 5 минут
+  maxLog: 20,
+};
+
+const state = {
+  windowMin: 5,
+  zAnomaly: 3,
+  refreshSec: 30,
+  historyRange: 60,
+  detailCoin: 'BTC',
+  sound: false,
+  nextAt: Date.now() + 30000,
+  data: {},          // code -> { candles, spark, vol, lastPrice, prevPrice, chg24, hotUntil, lastJumpAt, inAnomaly }
+  lastAlert: {},     // code -> timestamp
+  alerts: [],
+  charts: {},
+  sparks: {},
+  sim: { nextJumpAt: 0 },
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ============================================================
+   Расчёт волатильности (чистые функции, без DOM)
+   ============================================================ */
+// <pure>
+function mean(a) {
+  return a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+}
+
+function stdev(a) {
+  if (a.length < 2) return 0;
+  const m = mean(a);
+  return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1));
+}
+
+function median(a) {
+  if (!a.length) return 0;
+  const t = a.slice().sort((x, y) => x - y);
+  const n = t.length;
+  return n % 2 ? t[(n - 1) / 2] : (t[n / 2 - 1] + t[n / 2]) / 2;
+}
+
+/** Устойчивая оценка σ через медианное абсолютное отклонение (MAD):
+ *  редкие резкие скачки в истории почти не раздувают базовую волатильность. */
+function robustSigma(a) {
+  if (a.length < 2) return 0;
+  const m = median(a);
+  const mad = median(a.map((x) => Math.abs(x - m)));
+  return mad > 0 ? 1.4826 * mad : stdev(a);
+}
+
+/**
+ * Сравнивает цену в точке endIdx с ценой x минут назад и оценивает,
+ * насколько это движение необычно для данной монеты.
+ *
+ * @param {Array<{c:number,v:number}>} candles минутные свечи (старые → новые)
+ * @param {number} x      окно сравнения в минутах
+ * @param {object} o      { baseline, zAnomaly, zElevated, minMovePct }
+ * @param {number} endIdx индекс «текущей» свечи (по умолчанию последняя)
+ * @returns {object|null} null, если истории недостаточно
+ */
+function calcVolatility(candles, x, o, endIdx = candles.length - 1) {
+  const startIdx = endIdx - x;
+  if (startIdx - o.baseline < 0 || endIdx >= candles.length) return null;
+
+  const now = candles[endIdx].c;
+  const past = candles[startIdx].c;
+  const logR = Math.log(now / past);          // движение за x минут
+  const pct = (now / past - 1) * 100;
+
+  // Базовая волатильность: минутные доходности за baseline минут ДО окна сравнения
+  const rets = [];
+  for (let i = startIdx - o.baseline + 1; i <= startIdx; i++) {
+    rets.push(Math.log(candles[i].c / candles[i - 1].c));
+  }
+  const sigma = o.robust ? robustSigma(rets) : stdev(rets);
+  const sigmaX = Math.max(sigma, 1e-5) * Math.sqrt(x);  // σ за x минут (рост как √x)
+  const z = logR / sigmaX;
+
+  // Подтверждение объёмом: объём окна против обычного за то же число минут
+  let recentVol = 0;
+  for (let i = startIdx + 1; i <= endIdx; i++) recentVol += candles[i].v;
+  const baseVols = [];
+  for (let i = startIdx - o.baseline + 1; i <= startIdx; i++) baseVols.push(candles[i].v);
+  const volRatio = recentVol / (Math.max(mean(baseVols), 1e-9) * x);
+
+  const absZ = Math.abs(z);
+  let level = 'normal';
+  if (absZ >= o.zAnomaly && Math.abs(pct) >= o.minMovePct) level = 'anomaly';
+  else if (absZ >= o.zElevated) level = 'elevated';
+
+  return { now, past, pct, logR, sigma, sigmaX, z, volRatio, level, dir: z >= 0 ? 'up' : 'down' };
+}
+
+/** Z-score для каждой минуты истории (для детального графика) */
+function rollingZ(candles, x, o) {
+  return candles.map((_, i) => {
+    const v = calcVolatility(candles, x, o, i);
+    return v ? v.z : null;
+  });
+}
+// </pure>
+
+function volOpts() {
+  return {
+    baseline: CFG.baselineMin,
+    zAnomaly: state.zAnomaly,
+    zElevated: Math.max(1.5, state.zAnomaly - 1),
+    minMovePct: CFG.minMovePct,
+    robust: true,
+  };
+}
+
+/* ============================================================
+   Форматирование
+   ============================================================ */
+function fmtPrice(p) {
+  if (p == null || isNaN(p)) return '—';
+  const d = p >= 1000 ? 2 : p >= 10 ? 3 : p >= 1 ? 4 : 5;
+  return p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: d });
+}
+const fmtPct = (v, d = 2) => (v >= 0 ? '+' : '') + v.toFixed(d) + '%';
+const fmtZ = (z) => (z >= 0 ? '+' : '') + z.toFixed(1);
+const fmtTime = (t) => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+const dirClass = (v) => (v >= 0 ? 'text-up' : 'text-down');
+const arrow = (dir) => (dir === 'up' ? '▲' : '▼');
+
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/* ============================================================
+   Автономный симулятор рынка (Data Simulation)
+   Никаких внешних запросов: цены генерируются прямо в браузере
+   ============================================================ */
+const SIM = {
+  tickMs: 1500,               // период обновления цен (1.5 секунды)
+  firstJumpSec: 15,           // первый скачок вскоре после запуска, чтобы сразу увидеть алерт
+  jumpMinSec: 100,            // дальше скачок раз в 100-160 секунд
+  jumpMaxSec: 160,
+  jumpMinPct: 3,              // размер скачка 3-4%, вверх или вниз
+  jumpMaxPct: 4,
+  hotMs: 45000,               // после скачка монета ещё около минуты «штормит»
+  hotMult: 2.5,
+  revert: 0.0004,             // слабый возврат к базовой цене за один тик (иначе откат после скачка выглядит как новая аномалия)
+  sparkStepMs: 15 * 60 * 1000,
+  sparkPoints: 96,            // 96 точек по 15 минут = 24 часа
+};
+
+// Встроенная «база данных»: базовые цены и характер каждой монеты
+const MARKET_DB = [
+  { code: 'BTC', basePrice: 64500, tickAmp: 0.00030, baseVolume: 2.4e6, chg24Seed:  1.8 },
+  { code: 'ETH', basePrice: 2650,  tickAmp: 0.00045, baseVolume: 1.6e6, chg24Seed: -0.9 },
+  { code: 'SOL', basePrice: 155,   tickAmp: 0.00065, baseVolume: 0.9e6, chg24Seed:  3.2 },
+  { code: 'BNB', basePrice: 580,   tickAmp: 0.00035, baseVolume: 0.7e6, chg24Seed: -1.4 },
+];
+const MARKET = Object.fromEntries(MARKET_DB.map((m) => [m.code, m]));
+
+const rand = (lo, hi) => lo + Math.random() * (hi - lo);
+function gauss() {
+  return Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
+}
+const ticksPerMin = () => 60000 / SIM.tickMs;
+// σ одной минуты, согласованная с тиковым шумом: равномерный ±amp имеет σ = amp/√3
+const minuteSigma = (m) => (m.tickAmp / Math.sqrt(3)) * Math.sqrt(ticksPerMin());
+
+function tickVolume(m, mult = 1) {
+  return (m.baseVolume / ticksPerMin()) * rand(0.5, 1.5) * mult;
+}
+
+/** История минутных свечей: случайное блуждание НАЗАД от базовой цены */
+function genMinuteHistory(m, nowMs) {
+  const n = CFG.klines1m;
+  const sig = minuteSigma(m);
+  const tLast = Math.floor(nowMs / 60000) * 60000;
+  const logp = new Array(n);
+  logp[n - 1] = Math.log(m.basePrice);
+  for (let i = n - 1; i > 0; i--) logp[i - 1] = logp[i] - sig * gauss();
+
+  return logp.map((lp, i) => {
+    const c = Math.exp(lp);
+    const o = i > 0 ? Math.exp(logp[i - 1]) : c * Math.exp(sig * gauss());
+    const wick = sig * 0.35;
+    return {
+      t: tLast - (n - 1 - i) * 60000,
+      o, c,
+      h: Math.max(o, c) * (1 + Math.abs(gauss()) * wick),
+      l: Math.min(o, c) * (1 - Math.abs(gauss()) * wick),
+      v: m.baseVolume * rand(0.6, 1.4),
+    };
+  });
+}
+
+/** 24 часа истории по 15 минут; путь подгоняется под заданное изменение за сутки */
+function genSparkHistory(m, nowMs) {
+  const n = SIM.sparkPoints;
+  const sig = minuteSigma(m) * Math.sqrt(15);
+  const tLast = Math.floor(nowMs / SIM.sparkStepMs) * SIM.sparkStepMs;
+  const logp = new Array(n);
+  logp[n - 1] = Math.log(m.basePrice);
+  for (let i = n - 1; i > 0; i--) logp[i - 1] = logp[i] - sig * gauss();
+
+  const start = Math.log(m.basePrice / (1 + m.chg24Seed / 100));   // желаемая цена 24ч назад
+  const fix = start - logp[0];
+  for (let i = 0; i < n; i++) logp[i] += fix * ((n - 1 - i) / (n - 1));
+
+  return logp.map((lp, i) => {
+    const c = Math.exp(lp);
+    const o = i > 0 ? Math.exp(logp[i - 1]) : Math.exp(start);
+    return { t: tLast - (n - 1 - i) * SIM.sparkStepMs, o, c, h: Math.max(o, c), l: Math.min(o, c), v: 0 };
+  });
+}
+
+function initSimData(nowMs = Date.now()) {
+  MARKET_DB.forEach((m) => {
+    const candles = genMinuteHistory(m, nowMs);
+    const spark = genSparkHistory(m, nowMs);
+    const last = candles[candles.length - 1];
+    state.data[m.code] = {
+      candles, spark,
+      lastPrice: last.c, prevPrice: last.c, hotUntil: 0, lastJumpAt: 0, inAnomaly: false,
+      chg24: (last.c / spark[0].o - 1) * 100,
+    };
+  });
+  state.sim.nextJumpAt = nowMs + SIM.firstJumpSec * 1000;
+}
+
+/** Добавляет новые минутные и 15-минутные свечи, если наступила новая минута */
+function rollCandles(d, m, nowMs) {
+  const tMin = Math.floor(nowMs / 60000) * 60000;
+  let last = d.candles[d.candles.length - 1];
+  if (tMin - last.t > CFG.klines1m * 60000) last.t = tMin - CFG.klines1m * 60000;   // вкладка долго спала
+
+  while (last.t < tMin) {
+    const nt = last.t + 60000;
+    const o = last.c;
+    const gap = nt < tMin;                         // пропущенная минута: достраиваем «задним числом»
+    const c = gap ? o * Math.exp(minuteSigma(m) * gauss() + Math.log(m.basePrice / o) * 0.02) : o;
+    d.candles.push({ t: nt, o, c, h: Math.max(o, c), l: Math.min(o, c), v: gap ? m.baseVolume * rand(0.6, 1.4) : 0 });
+    if (d.candles.length > CFG.klines1m) d.candles.shift();
+    last = d.candles[d.candles.length - 1];
+    if (gap) d.lastPrice = last.c;
+  }
+
+  const t15 = Math.floor(nowMs / SIM.sparkStepMs) * SIM.sparkStepMs;
+  let sl = d.spark[d.spark.length - 1];
+  if (t15 - sl.t > SIM.sparkPoints * SIM.sparkStepMs) sl.t = t15 - SIM.sparkPoints * SIM.sparkStepMs;
+  while (sl.t < t15) {
+    const o = sl.c;
+    d.spark.push({ t: sl.t + SIM.sparkStepMs, o, c: o, h: o, l: o, v: 0 });
+    if (d.spark.length > SIM.sparkPoints) d.spark.shift();
+    sl = d.spark[d.spark.length - 1];
+  }
+}
+
+/** Записывает новую цену в текущую свечу и в спарклайн */
+function setPrice(d, price, vol) {
+  d.prevPrice = d.lastPrice;
+  d.lastPrice = price;
+  const k = d.candles[d.candles.length - 1];
+  k.c = price; k.h = Math.max(k.h, price); k.l = Math.min(k.l, price); k.v += vol;
+  const sl = d.spark[d.spark.length - 1];
+  sl.c = price; sl.h = Math.max(sl.h, price); sl.l = Math.min(sl.l, price);
+  d.chg24 = (price / d.spark[0].o - 1) * 100;
+}
+
+/** Резкий скачок 3-4% у случайной монеты.
+ *  Берём только «спокойную» монету: не в аномалии и без свежего скачка/алерта.
+ *  Если такой нет, возвращаем null, и скачок откладывается (иначе алерт на него всё равно не сработал бы). */
+function triggerJump(nowMs, forceCode) {
+  const quiet = (c) => {
+    const d = state.data[c.code];
+    return !d.inAnomaly
+      && nowMs - (d.lastJumpAt || 0) >= CFG.cooldownMs + 15000
+      && nowMs - (state.lastAlert[c.code] || 0) >= CFG.cooldownMs + 15000;
+  };
+  const pool = COINS.filter(quiet);
+  if (!forceCode && !pool.length) return null;
+  const code = forceCode || pool[Math.floor(Math.random() * pool.length)].code;
+  const m = MARKET[code], d = state.data[code];
+  d.lastJumpAt = nowMs;
+  // направление случайное, но если цена ушла далеко от базы, скачок чаще ведёт обратно к ней
+  const dev = Math.log(d.lastPrice / m.basePrice);
+  const pUp = Math.min(0.85, Math.max(0.15, 0.5 - dev * 6));
+  const dir = Math.random() < pUp ? 1 : -1;
+  const size = rand(SIM.jumpMinPct, SIM.jumpMaxPct);
+  setPrice(d, d.lastPrice * (1 + (dir * size) / 100), m.baseVolume * rand(3, 5));   // всплеск объёма на скачке
+  d.hotUntil = nowMs + SIM.hotMs;
+  return { code, dir, size };
+}
+
+/** Один шаг рынка: двигаем цены, иногда устраиваем скачок, пересчитываем волатильность */
+function simTick(nowMs = Date.now()) {
+  COINS.forEach((c) => {
+    const m = MARKET[c.code], d = state.data[c.code];
+    rollCandles(d, m, nowMs);
+    const hot = nowMs < d.hotUntil;
+    const noise = (Math.random() * 2 - 1) * m.tickAmp * (hot ? SIM.hotMult : 1);   // случайный шаг
+    const pull = Math.log(m.basePrice / d.lastPrice) * SIM.revert;                 // мягкий возврат к базе
+    setPrice(d, d.lastPrice * Math.exp(noise + pull), tickVolume(m, hot ? 3 : 1));
+  });
+
+  if (nowMs >= state.sim.nextJumpAt) {
+    const jumped = triggerJump(nowMs);   // null, если все монеты ещё «остывают»
+    state.sim.nextJumpAt = nowMs + (jumped ? rand(SIM.jumpMinSec, SIM.jumpMaxSec) * 1000 : 10000);
+  }
+
+  analyze(true, nowMs);
+  renderAll();
+  $('last-update').textContent = 'Обновлено в ' + new Date(nowMs).toLocaleTimeString('ru-RU');
+}
+
+/** Кнопка и кольцо-таймер: полный пересчёт и перерисовка всех панелей */
+function refresh() {
+  analyze(false);
+  renderAll();
+  $('last-update').textContent = 'Обновлено в ' + new Date().toLocaleTimeString('ru-RU');
+  state.nextAt = Date.now() + state.refreshSec * 1000;
+}
+
+/* ============================================================
+   Анализ и алерты
+   ============================================================ */
+function analyze(detectAlerts, now = Date.now()) {
+  const o = volOpts();
+  COINS.forEach((c) => {
+    const d = state.data[c.code];
+    if (!d || !d.candles) return;
+    d.vol = calcVolatility(d.candles, state.windowMin, o);
+    const wasAnomaly = d.inAnomaly;
+    d.inAnomaly = !!d.vol && d.vol.level === 'anomaly';
+    if (!detectAlerts || !d.inAnomaly || wasAnomaly) return;   // алерт только в момент начала аномалии
+    if (now - (state.lastAlert[c.code] || 0) < CFG.cooldownMs) return;
+    state.lastAlert[c.code] = now;
+    pushAlert({ time: now, code: c.code, dir: d.vol.dir, pct: d.vol.pct, z: d.vol.z, win: state.windowMin });
+  });
+}
+
+function pushAlert(a) {
+  state.alerts.unshift(a);
+  state.alerts.length = Math.min(state.alerts.length, CFG.maxLog);
+  showToast(a);
+  beep(a.dir === 'up');
+  renderLog();
+}
+
+/* ============================================================
+   Уведомления: тосты, звук
+   ============================================================ */
+function showToast(a) {
+  const up = a.dir === 'up';
+  const el = document.createElement('div');
+  el.className = `toast glass rounded-xl px-4 py-3 border ${up ? 'border-up/60' : 'border-down/60'}`;
+  el.style.boxShadow = `0 8px 30px ${up ? 'rgba(46,230,166,.2)' : 'rgba(255,84,112,.2)'}`;
+  el.innerHTML = `
+    <div class="flex items-center justify-between gap-3">
+      <div class="font-bold ${up ? 'text-up' : 'text-down'}">${a.test ? 'Тест: ' : ''}${a.code} ${arrow(a.dir)} ${fmtPct(a.pct)}</div>
+      <div class="text-[11px] text-slate-500 font-mono">${fmtTime(a.time)}</div>
+    </div>
+    <div class="text-xs text-slate-400 mt-0.5">${up ? 'Резкий рост' : 'Резкое падение'} за ${a.win} мин, Z = ${fmtZ(a.z)}</div>`;
+  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 300); };
+  el.addEventListener('click', close);
+  $('toasts').prepend(el);
+  setTimeout(close, 8000);
+}
+
+let audioCtx = null;
+function beep(up) {
+  if (!state.sound) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(up ? 740 : 460, t0);
+    osc.frequency.exponentialRampToValueAtTime(up ? 980 : 330, t0 + 0.25);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.14, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.4);
+  } catch (_) { /* звук необязателен */ }
+}
+
+/* ============================================================
+   Статус и таймер
+   ============================================================ */
+function setStatus() {
+  $('status').className = 'inline-flex items-center gap-2 text-[13px] font-semibold text-up';
+  $('status').innerHTML = '<span class="w-2 h-2 rounded-full bg-up live-dot"></span><span>Система: Автономный Live-режим</span>';
+}
+
+const RING_C = 2 * Math.PI * 23;
+function tick() {
+  const remain = Math.max(0, (state.nextAt - Date.now()) / 1000);
+  const total = state.refreshSec;
+  $('ring').style.strokeDashoffset = RING_C * (1 - remain / total);
+  $('count').textContent = Math.ceil(remain);
+  if (remain <= 0) refresh();
+}
+
+/* ============================================================
+   Рендер: карточки
+   ============================================================ */
+function buildCards() {
+  $('cards').innerHTML = COINS.map((c) => `
+    <article id="card-${c.code}" class="card glass rounded-2xl p-4 flex flex-col gap-3 transition-colors">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-9 h-9 shrink-0 rounded-full grid place-items-center text-[11px] font-bold font-mono"
+               style="background:${hexA(c.color, .14)};color:${c.color};box-shadow:inset 0 0 0 1px ${hexA(c.color, .45)}">${c.code}</div>
+          <div class="min-w-0">
+            <div class="text-sm font-semibold leading-tight truncate">${c.name}</div>
+            <div class="text-[11px] text-slate-500 font-mono">${c.code}/USDT</div>
+          </div>
+        </div>
+        <span id="badge-${c.code}" class="badge badge-norm">нет данных</span>
+      </div>
+
+      <div>
+        <div id="price-${c.code}" class="font-mono text-[26px] leading-8 font-semibold tracking-tight shimmer">0</div>
+        <div class="flex items-center gap-2 mt-1">
+          <span id="chg-${c.code}" class="font-mono text-sm font-semibold text-slate-400">—</span>
+          <span class="text-[11px] text-slate-500">за 24 часа</span>
+        </div>
+      </div>
+
+      <div class="relative h-16 -mx-1"><canvas id="spark-${c.code}"></canvas></div>
+
+      <div class="flex items-center justify-between text-[12px] border-t border-line pt-2.5">
+        <span class="text-slate-500">За <span class="win-label">${state.windowMin}</span> мин <b id="dx-${c.code}" class="font-mono font-semibold text-slate-300">—</b></span>
+        <span class="text-slate-500">Z <b id="dz-${c.code}" class="font-mono font-semibold text-slate-300">—</b></span>
+      </div>
+    </article>`).join('');
+
+  COINS.forEach((c) => {
+    state.sparks[c.code] = new Chart($('spark-' + c.code), {
+      type: 'line',
+      data: { labels: [], datasets: [{
+        data: [], borderColor: '#38d0f0', borderWidth: 1.6, pointRadius: 0, tension: 0.3, fill: true,
+        backgroundColor: (ctx) => {
+          const a = ctx.chart.chartArea;
+          if (!a) return 'transparent';
+          const g = ctx.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+          g.addColorStop(0, hexA(ctx.dataset._hex || '#38d0f0', 0.28));
+          g.addColorStop(1, hexA(ctx.dataset._hex || '#38d0f0', 0));
+          return g;
+        },
+      }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, events: [],
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { display: false } },
+        layout: { padding: { top: 4, bottom: 2 } },
+      },
+    });
+  });
+}
+
+function levelBadge(v) {
+  if (!v) return { cls: 'badge-norm', text: 'мало данных' };
+  if (v.level === 'anomaly') return v.dir === 'up'
+    ? { cls: 'badge-up', text: '▲ аномалия' }
+    : { cls: 'badge-down', text: '▼ аномалия' };
+  if (v.level === 'elevated') return { cls: 'badge-warn', text: 'повышенная' };
+  return { cls: 'badge-norm', text: 'норма' };
+}
+
+function renderCards() {
+  document.querySelectorAll('.win-label').forEach((e) => (e.textContent = state.windowMin));
+
+  COINS.forEach((c) => {
+    const d = state.data[c.code];
+    if (!d || d.lastPrice == null) return;
+
+    // Цена с вспышкой при изменении
+    const pe = $('price-' + c.code);
+    pe.classList.remove('shimmer');
+    pe.style.width = '';
+    pe.textContent = fmtPrice(d.lastPrice);
+    if (d.prevPrice != null && d.prevPrice !== d.lastPrice) {
+      pe.classList.remove('flash-up', 'flash-down');
+      void pe.offsetWidth;
+      pe.classList.add(d.lastPrice > d.prevPrice ? 'flash-up' : 'flash-down');
+    }
+
+    // Изменение за 24 часа
+    const ce = $('chg-' + c.code);
+    if (d.chg24 != null) {
+      ce.textContent = (d.chg24 >= 0 ? '▲ ' : '▼ ') + fmtPct(d.chg24);
+      ce.className = `font-mono text-sm font-semibold ${dirClass(d.chg24)}`;
+    }
+
+    // Бейдж и подсветка карточки
+    const v = d.vol;
+    const b = levelBadge(v);
+    $('badge-' + c.code).className = 'badge ' + b.cls;
+    $('badge-' + c.code).textContent = b.text;
+
+    const card = $('card-' + c.code);
+    card.classList.remove('is-warn', 'is-anom-up', 'is-anom-down');
+    if (v && v.level === 'anomaly') card.classList.add(v.dir === 'up' ? 'is-anom-up' : 'is-anom-down');
+    else if (v && v.level === 'elevated') card.classList.add('is-warn');
+
+    if (v) {
+      $('dx-' + c.code).textContent = fmtPct(v.pct);
+      $('dx-' + c.code).className = `font-mono font-semibold ${dirClass(v.pct)}`;
+      $('dz-' + c.code).textContent = fmtZ(v.z);
+      $('dz-' + c.code).className = 'font-mono font-semibold ' +
+        (v.level === 'anomaly' ? dirClass(v.z) : v.level === 'elevated' ? 'text-warn' : 'text-slate-300');
+    }
+
+    // Спарклайн за 24 часа
+    if (d.spark && d.spark.length) {
+      const ch = state.sparks[c.code];
+      const up = d.spark[d.spark.length - 1].c >= d.spark[0].o;
+      const hex = up ? '#2ee6a6' : '#ff5470';
+      ch.data.labels = d.spark.map((k) => k.t);
+      ch.data.datasets[0].data = d.spark.map((k) => k.c);
+      ch.data.datasets[0].borderColor = hex;
+      ch.data.datasets[0]._hex = hex;
+      ch.update('none');
+    }
+  });
+}
+
+/* ============================================================
+   Рендер: баннер, таблица, журнал
+   ============================================================ */
+function renderBanner() {
+  const box = $('banner');
+  const active = COINS.map((c) => ({ c, v: state.data[c.code] && state.data[c.code].vol }))
+    .filter((r) => r.v && r.v.level === 'anomaly');
+  if (!active.length) { box.classList.add('hidden'); return; }
+
+  const allUp = active.every((r) => r.v.dir === 'up');
+  const allDown = active.every((r) => r.v.dir === 'down');
+  const tone = allUp ? 'border-up/60 bg-up/10' : allDown ? 'border-down/60 bg-down/10' : 'border-warn/60 bg-warn/10';
+  box.className = `mb-4 rounded-2xl border px-4 py-3 ${tone}`;
+  box.innerHTML = `
+    <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+      <span class="font-bold">Аномальная волатильность</span>
+      ${active.map((r) => `
+        <span class="font-mono text-sm ${r.v.dir === 'up' ? 'text-up' : 'text-down'}">
+          ${r.c.code} ${arrow(r.v.dir)} ${fmtPct(r.v.pct)} за ${state.windowMin} мин, Z = ${fmtZ(r.v.z)}
+        </span>`).join('')}
+    </div>`;
+}
+
+function renderTable() {
+  const x = state.windowMin;
+  $('th-past').textContent = `Цена ${x} мин назад`;
+  $('th-win').textContent = `Изменение за ${x} мин`;
+
+  const rows = COINS.map((c) => ({ c, v: state.data[c.code] && state.data[c.code].vol }))
+    .filter((r) => r.v)
+    .sort((a, b) => Math.abs(b.v.z) - Math.abs(a.v.z));
+
+  $('vol-body').innerHTML = rows.map(({ c, v }) => {
+    const b = levelBadge(v);
+    const zCls = v.level === 'anomaly' ? dirClass(v.z) : v.level === 'elevated' ? 'text-warn' : 'text-slate-300';
+    const rowBg = v.level === 'anomaly' ? (v.dir === 'up' ? 'bg-up/[.06]' : 'bg-down/[.06]') : '';
+    return `
+      <tr class="border-b border-line/60 last:border-0 ${rowBg}">
+        <td class="py-2.5 pr-3 font-semibold"><span class="inline-block w-2 h-2 rounded-full mr-2" style="background:${c.color}"></span>${c.code}</td>
+        <td class="py-2.5 pr-3 text-right font-mono text-slate-400">${fmtPrice(v.past)}</td>
+        <td class="py-2.5 pr-3 text-right font-mono">${fmtPrice(v.now)}</td>
+        <td class="py-2.5 pr-3 text-right font-mono font-semibold ${dirClass(v.pct)}">${fmtPct(v.pct, 3)}</td>
+        <td class="py-2.5 pr-3 text-right font-mono text-slate-400">${(v.sigma * 100).toFixed(3)}%</td>
+        <td class="py-2.5 pr-3 text-right font-mono font-semibold ${zCls}">${fmtZ(v.z)}</td>
+        <td class="py-2.5 pr-3 text-right font-mono ${v.volRatio >= 2 ? 'text-warn' : 'text-slate-400'}">×${v.volRatio.toFixed(1)}</td>
+        <td class="py-2.5"><span class="badge ${b.cls}">${b.text}</span></td>
+      </tr>`;
+  }).join('') || `<tr><td colspan="8" class="py-6 text-center text-slate-500">Данные ещё загружаются</td></tr>`;
+}
+
+function renderLog() {
+  const ul = $('log');
+  if (!state.alerts.length) {
+    ul.innerHTML = `<li class="text-sm text-slate-500 py-6 text-center leading-relaxed">Пока всё спокойно.<br>Здесь появятся резкие движения цены.</li>`;
+    return;
+  }
+  ul.innerHTML = state.alerts.map((a) => {
+    const up = a.dir === 'up';
+    return `
+      <li class="flex items-center justify-between gap-2 rounded-xl border px-3 py-2 ${up ? 'border-up/30 bg-up/5' : 'border-down/30 bg-down/5'}">
+        <div class="min-w-0">
+          <div class="font-mono text-sm font-semibold ${up ? 'text-up' : 'text-down'}">${a.code} ${arrow(a.dir)} ${fmtPct(a.pct)}${a.test ? ' <span class="text-[10px] text-slate-500 font-sans font-medium">тест</span>' : ''}</div>
+          <div class="text-[11px] text-slate-500">за ${a.win} мин, Z = ${fmtZ(a.z)}</div>
+        </div>
+        <div class="text-xs text-slate-400 font-mono shrink-0">${fmtTime(a.time)}</div>
+      </li>`;
+  }).join('');
+}
+
+/* ============================================================
+   Графики Chart.js
+   ============================================================ */
+// Плагин: горизонтальные пунктирные линии порогов
+const thresholdPlugin = {
+  id: 'thresholds',
+  afterDatasetsDraw(chart, _args, opts) {
+    if (!opts || !opts.lines) return;
+    const { ctx, chartArea: a, scales } = chart;
+    const s = scales[opts.scale || 'y'];
+    if (!s) return;
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1;
+    ctx.font = '10px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'right';
+    opts.lines.forEach((l) => {
+      const y = s.getPixelForValue(l.value);
+      if (y < a.top || y > a.bottom) return;
+      ctx.strokeStyle = l.color;
+      ctx.beginPath(); ctx.moveTo(a.left, y); ctx.lineTo(a.right, y); ctx.stroke();
+      if (l.label) { ctx.fillStyle = l.color; ctx.fillText(l.label, a.right - 4, y - 3); }
+    });
+    ctx.restore();
+  },
+};
+
+const GRID = 'rgba(148, 163, 184, .08)';
+
+function initCharts() {
+  Chart.register(thresholdPlugin);
+  Chart.defaults.color = '#8892a6';
+  Chart.defaults.font.family = 'Manrope, system-ui, sans-serif';
+  Chart.defaults.font.size = 11;
+
+  const tooltip = {
+    backgroundColor: 'rgba(10, 13, 18, .95)', borderColor: '#243044', borderWidth: 1,
+    titleColor: '#e2e8f0', bodyColor: '#cbd5e1', padding: 10, boxPadding: 4,
+  };
+
+  // 1. История: изменение всех монет в % от начала периода
+  state.charts.history = new Chart($('chart-history'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: COINS.map((c) => ({
+        label: c.code, data: [], borderColor: c.color, borderWidth: 2,
+        pointRadius: 0, pointHoverRadius: 4, tension: 0.25,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', align: 'end', labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8 } },
+        tooltip: { ...tooltip, callbacks: { label: (c) => ` ${c.dataset.label}: ${fmtPct(c.parsed.y)}` } },
+      },
+      scales: {
+        x: { grid: { color: GRID }, ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+        y: { grid: { color: (c) => (c.tick.value === 0 ? 'rgba(148,163,184,.35)' : GRID) }, ticks: { callback: (v) => v.toFixed(1) + '%' } },
+      },
+    },
+  });
+
+  // 2. Z-score по монетам
+  state.charts.z = new Chart($('chart-z'), {
+    type: 'bar',
+    data: { labels: COINS.map((c) => c.code), datasets: [{ data: COINS.map(() => 0), backgroundColor: [], borderRadius: 6, borderSkipped: false, maxBarThickness: 44 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+      plugins: {
+        legend: { display: false },
+        tooltip: { ...tooltip, callbacks: { label: (c) => ` Z = ${fmtZ(c.parsed.y)}` } },
+        thresholds: { scale: 'y', lines: [] },
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: { suggestedMin: -4, suggestedMax: 4, grid: { color: (c) => (c.tick.value === 0 ? 'rgba(148,163,184,.35)' : GRID) } },
+      },
+    },
+  });
+
+  // 3. Детали: цена (линия) + Z-score по минутам (столбцы)
+  state.charts.detail = new Chart($('chart-detail'), {
+    data: {
+      labels: [],
+      datasets: [
+        {
+          type: 'line', label: 'Цена', data: [], yAxisID: 'y', borderColor: '#38d0f0', borderWidth: 2,
+          pointRadius: 0, pointHoverRadius: 4, tension: 0.2, fill: true, order: 2,
+          backgroundColor: (ctx) => {
+            const a = ctx.chart.chartArea;
+            if (!a) return 'transparent';
+            const g = ctx.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+            g.addColorStop(0, hexA(ctx.dataset._hex || '#38d0f0', 0.22));
+            g.addColorStop(1, hexA(ctx.dataset._hex || '#38d0f0', 0));
+            return g;
+          },
+        },
+        { type: 'bar', label: 'Z-score', data: [], yAxisID: 'y1', backgroundColor: [], barPercentage: 1, categoryPercentage: 0.9, order: 1 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8, boxHeight: 8 } },
+        tooltip: {
+          ...tooltip,
+          callbacks: {
+            label: (c) => c.dataset.label === 'Цена' ? ` Цена: ${fmtPrice(c.parsed.y)}` : ` Z-score: ${fmtZ(c.parsed.y)}`,
+          },
+        },
+        thresholds: { scale: 'y1', lines: [] },
+      },
+      scales: {
+        x: { grid: { color: GRID }, ticks: { maxTicksLimit: 10, maxRotation: 0 } },
+        y: { position: 'left', grace: '5%', grid: { color: GRID }, ticks: { callback: (v) => fmtPrice(v) } },
+        y1: { position: 'right', suggestedMin: -4, suggestedMax: 4, grid: { drawOnChartArea: false }, title: { display: true, text: 'Z-score' } },
+      },
+    },
+  });
+}
+
+function zColor(z, o, alpha = 1) {
+  const a = Math.abs(z);
+  if (a >= o.zAnomaly) return z > 0 ? `rgba(46, 230, 166, ${alpha})` : `rgba(255, 84, 112, ${alpha})`;
+  if (a >= o.zElevated) return `rgba(245, 184, 61, ${alpha * 0.9})`;
+  return `rgba(136, 146, 166, ${alpha * 0.35})`;
+}
+
+function thresholdLines(o) {
+  return [
+    { value:  o.zElevated, color: 'rgba(245,184,61,.7)', label: '+' + o.zElevated.toFixed(1) },
+    { value: -o.zElevated, color: 'rgba(245,184,61,.7)' },
+    { value:  o.zAnomaly,  color: 'rgba(255,84,112,.75)', label: '+' + o.zAnomaly.toFixed(1) },
+    { value: -o.zAnomaly,  color: 'rgba(255,84,112,.75)' },
+  ];
+}
+
+function renderZChart() {
+  const o = volOpts();
+  const ch = state.charts.z;
+  const vals = COINS.map((c) => {
+    const v = state.data[c.code] && state.data[c.code].vol;
+    return v ? +v.z.toFixed(2) : 0;
+  });
+  ch.data.datasets[0].data = vals;
+  ch.data.datasets[0].backgroundColor = vals.map((z) => zColor(z, o));
+  ch.options.plugins.thresholds.lines = thresholdLines(o);
+  ch.options.scales.y.suggestedMax = Math.max(4, o.zAnomaly + 1);
+  ch.options.scales.y.suggestedMin = -Math.max(4, o.zAnomaly + 1);
+  ch.update();
+  $('z-sub').textContent = `Движение за ${state.windowMin} мин в «обычных шагах» монеты`;
+}
+
+function renderHistory() {
+  const ch = state.charts.history;
+  const avail = COINS.filter((c) => state.data[c.code] && state.data[c.code].candles);
+  if (!avail.length) return;
+  const n = Math.min(state.historyRange + 1, ...avail.map((c) => state.data[c.code].candles.length));
+  ch.data.labels = state.data[avail[0].code].candles.slice(-n).map((k) => fmtTime(k.t));
+  ch.data.datasets.forEach((ds, i) => {
+    const d = state.data[COINS[i].code];
+    if (!d || !d.candles) { ds.data = []; return; }
+    const s = d.candles.slice(-n);
+    const base = s[0].c;
+    ds.data = s.map((k) => (k.c / base - 1) * 100);
+  });
+  ch.update('none');
+}
+
+function renderDetail() {
+  const c = COINS.find((x) => x.code === state.detailCoin);
+  const d = state.data[c.code];
+  if (!d || !d.candles) return;
+  const o = volOpts();
+  const ch = state.charts.detail;
+
+  const zs = rollingZ(d.candles, state.windowMin, o);
+  const n = Math.min(120, d.candles.length);
+  const cs = d.candles.slice(-n);
+  const zSlice = zs.slice(-n);
+
+  ch.data.labels = cs.map((k) => fmtTime(k.t));
+  ch.data.datasets[0].data = cs.map((k) => k.c);
+  ch.data.datasets[0].borderColor = c.color;
+  ch.data.datasets[0]._hex = c.color;
+  ch.data.datasets[1].data = zSlice;
+  ch.data.datasets[1].backgroundColor = zSlice.map((z) => (z == null ? 'transparent' : zColor(z, o, 0.85)));
+  ch.options.plugins.thresholds.lines = thresholdLines(o);
+  ch.options.scales.y1.suggestedMax = Math.max(4, o.zAnomaly + 1);
+  ch.options.scales.y1.suggestedMin = -Math.max(4, o.zAnomaly + 1);
+  ch.update('none');
+}
+
+function renderAll() {
+  renderCards();
+  renderBanner();
+  renderTable();
+  renderZChart();
+  renderHistory();
+  renderDetail();
+}
+
+/* ============================================================
+   Управление интерфейсом
+   ============================================================ */
+function bindSeg(id, cb) {
+  const box = $(id);
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    [...box.children].forEach((x) => x.classList.toggle('on', x === b));
+    cb(b.dataset.v);
+  });
+}
+
+function bindUI() {
+  // Окно сравнения X минут: мгновенный пересчёт по накопленной истории
+  bindSeg('seg-window', (v) => {
+    state.windowMin = +v;
+    analyze(false);
+    renderAll();
+  });
+
+  bindSeg('seg-refresh', (v) => {
+    state.refreshSec = +v;
+    state.nextAt = Date.now() + state.refreshSec * 1000;
+  });
+
+  bindSeg('seg-history', (v) => {
+    state.historyRange = +v;
+    renderHistory();
+  });
+
+  $('z-range').addEventListener('input', (e) => {
+    state.zAnomaly = +e.target.value;
+    $('z-val').textContent = state.zAnomaly.toFixed(1);
+    analyze(false);
+    renderAll();
+  });
+
+  // Выбор монеты для детального графика
+  $('seg-detail').innerHTML = COINS.map((c) => `<button data-v="${c.code}" class="${c.code === state.detailCoin ? 'on' : ''}">${c.code}</button>`).join('');
+  bindSeg('seg-detail', (v) => {
+    state.detailCoin = v;
+    renderDetail();
+  });
+
+  $('btn-refresh').addEventListener('click', () => refresh());
+
+  $('btn-sound').addEventListener('click', (e) => {
+    state.sound = !state.sound;
+    e.currentTarget.classList.toggle('on', state.sound);
+    e.currentTarget.textContent = state.sound ? 'Звук включён' : 'Звук выключен';
+    if (state.sound) beep(true);  // пользовательский клик разрешает аудио в браузере
+  });
+
+  $('btn-test').addEventListener('click', () => {
+    const c = COINS[Math.floor(Math.random() * COINS.length)];
+    const up = Math.random() > 0.5;
+    const pct = (0.6 + Math.random() * 0.9) * (up ? 1 : -1);
+    const z = (3.2 + Math.random() * 1.3) * (up ? 1 : -1);
+    pushAlert({ time: Date.now(), code: c.code, dir: up ? 'up' : 'down', pct, z, win: state.windowMin, test: true });
+  });
+
+  // При возврате на вкладку сразу догоняем рынок
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) simTick();   // догоняем рынок за время, пока вкладка была скрыта
+  });
+}
+
+/* ============================================================
+   Старт
+   ============================================================ */
+buildCards();
+initCharts();
+bindUI();
+renderLog();
+initSimData();
+analyze(false);
+renderAll();
+setStatus();
+$('last-update').textContent = 'Обновлено в ' + new Date().toLocaleTimeString('ru-RU');
+setInterval(simTick, SIM.tickMs);
+setInterval(tick, 250);
+</script>
+</body>
+</html>
